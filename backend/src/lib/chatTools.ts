@@ -1544,6 +1544,8 @@ export async function runToolCalls(
     docsReplicated: DocReplicatedResult[];
     workflowsApplied: { workflow_id: string; title: string }[];
     docsEdited: DocEditedResult[];
+    /** MCP citations extracted from tool results (Chunk 4). */
+    mcpCitations: import("./mcp/types.js").Citation[];
 }> {
     const toolResults: unknown[] = [];
     const docsRead: { filename: string; document_id?: string }[] = [];
@@ -1556,6 +1558,8 @@ export async function runToolCalls(
     const docsReplicated: DocReplicatedResult[] = [];
     const workflowsApplied: { workflow_id: string; title: string }[] = [];
     const docsEdited: DocEditedResult[] = [];
+    /** Accumulated MCP citations for Chunk 4 */
+    const mcpCitations: import("./mcp/types.js").Citation[] = [];
 
     for (const tc of toolCalls) {
         let args: Record<string, unknown> = {};
@@ -2284,11 +2288,32 @@ export async function runToolCalls(
                         });
                     } else {
                         const mcpResult = await resolvedManager.callTool(serverName, mcpTool, args);
+                        const mcpResultStr = JSON.stringify(mcpResult);
                         toolResults.push({
                             role: "tool",
                             tool_call_id: tc.id,
-                            content: JSON.stringify(mcpResult),
+                            content: mcpResultStr,
                         });
+
+                        // Extract citations from successful MCP results (Chunk 4)
+                        // Only parse if the result is not an error
+                        if (!("error" in mcpResult)) {
+                            const { parseMcpResultToCitations } = await import("./mcp/citationParser.js");
+                            // Determine source type from server name
+                            const sourceTypeMap: Record<string, import("./mcp/types.js").CitationSourceType> = {
+                                courtlistener: "courtlistener",
+                                govinfo: "govinfo",
+                                "al-meezan": "al-meezan",
+                                eurlex: "eurlex",
+                                italaw: "italaw",
+                                icsid: "icsid",
+                            };
+                            const sourceType = sourceTypeMap[serverName];
+                            if (sourceType) {
+                                const newCitations = parseMcpResultToCitations(sourceType, mcpResultStr, userId);
+                                mcpCitations.push(...(newCitations as import("./mcp/types.js").Citation[]));
+                            }
+                        }
                     }
                 } catch (err) {
                     toolResults.push({
@@ -2313,6 +2338,7 @@ export async function runToolCalls(
         docsReplicated,
         workflowsApplied,
         docsEdited,
+        mcpCitations,
     };
 }
 
@@ -2580,6 +2606,9 @@ export async function runLLMStream(params: {
 
     const selectedModel = resolveModel(model, DEFAULT_MAIN_MODEL);
 
+    /** Accumulate MCP citations across all tool-call batches in this turn (Chunk 4). */
+    const allMcpCitations: import("./mcp/types.js").Citation[] = [];
+
     await streamChatWithTools({
         model: selectedModel,
         systemPrompt,
@@ -2643,6 +2672,7 @@ export async function runLLMStream(params: {
                 docsReplicated,
                 workflowsApplied,
                 docsEdited,
+                mcpCitations: batchCitations,
             } = await runToolCalls(
                     toolCalls,
                     docStore,
@@ -2656,6 +2686,8 @@ export async function runLLMStream(params: {
                     projectId,
                     mcpManager ?? null,
                 );
+            // Accumulate MCP citations across all tool-call batches
+            allMcpCitations.push(...batchCitations);
             for (const r of docsRead) {
                 events.push({
                     type: "doc_read",
@@ -2731,6 +2763,10 @@ export async function runLLMStream(params: {
     });
 
     flushText();
+
+    // Emit MCP citations SSE event (Chunk 4)
+    // Emit even if empty so the frontend always receives this event.
+    write(`data: ${JSON.stringify({ type: "mcp_citations", citations: allMcpCitations })}\n\n`);
 
     // Parse and emit citations from <CITATIONS> block
     const citations = buildCitations
