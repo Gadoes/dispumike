@@ -316,11 +316,18 @@ chatRouter.post("/:chatId/generate-title", requireAuth, async (req, res) => {
 // POST /chat — streaming
 chatRouter.post("/", requireAuth, async (req, res) => {
     const userId = res.locals.userId as string;
-    const { messages, chat_id, project_id, model } = req.body as {
+    const { messages, chat_id, project_id, model, mcpScope } = req.body as {
         messages: ChatMessage[];
         chat_id?: string;
         project_id?: string;
         model?: string;
+        /**
+         * Per-query scope override — list of server names to restrict MCP
+         * tool calls to. When provided, only servers in this list are active,
+         * overriding the user's persistent connection-level `enabled` flag.
+         * Chunk 8 wires this from the frontend scope picker.
+         */
+        mcpScope?: string[] | null;
     };
 
     console.log("[chat/stream] incoming request", {
@@ -450,6 +457,7 @@ chatRouter.post("/", requireAuth, async (req, res) => {
             model,
             apiKeys,
             projectId: project_id ?? null,
+            mcpScope: mcpScope ?? null,
         });
 
         console.log("[chat/stream] LLM stream finished", {
