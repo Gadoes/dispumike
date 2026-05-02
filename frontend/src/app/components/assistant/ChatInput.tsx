@@ -22,6 +22,7 @@ import { AddDocumentsModal } from "../shared/AddDocumentsModal";
 import { AssistantWorkflowModal } from "./AssistantWorkflowModal";
 import { ApiKeyMissingModal } from "../shared/ApiKeyMissingModal";
 import { ModelToggle } from "./ModelToggle";
+import { SourcesPill, SourcePickerPopover } from "./SourcePickerPopover";
 import { useSelectedModel } from "@/app/hooks/useSelectedModel";
 import { useUserProfile } from "@/contexts/UserProfileContext";
 import {
@@ -76,6 +77,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     const [workflowModalOpen, setWorkflowModalOpen] = useState(false);
     const [apiKeyModalProvider, setApiKeyModalProvider] =
         useState<ModelProvider | null>(null);
+    const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
+    // activeSourceCount is 0 until the user has connected sources; computed on
+    // popover open. Chunk 8 will wire this up to actual active scope.
+    const [activeSourceCount, setActiveSourceCount] = useState(0);
 
     useImperativeHandle(ref, () => ({
         addDoc: (doc: MikeDocument) => {
@@ -231,7 +236,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
 
                     {/* Controls */}
                     <div className="flex items-center justify-between md:p-2.5 p-2">
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 relative">
                             {!hideAddDocButton && (
                                 <AddDocButton
                                     onSelectDoc={handleAddDocFromProject}
@@ -270,6 +275,18 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                                         Workflows
                                     </span>
                                 </button>
+                            )}
+                            {/* Sources pill + popover */}
+                            <SourcesPill
+                                activeCount={activeSourceCount}
+                                onClick={() =>
+                                    setSourcePickerOpen((v) => !v)
+                                }
+                            />
+                            {sourcePickerOpen && (
+                                <SourcePickerPopover
+                                    onClose={() => setSourcePickerOpen(false)}
+                                />
                             )}
                         </div>
 
