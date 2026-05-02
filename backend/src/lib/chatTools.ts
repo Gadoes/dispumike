@@ -2479,7 +2479,7 @@ export async function runLLMStream(params: {
      * A null/undefined value means "use all connected servers".
      */
     mcpScope?: string[] | null;
-}): Promise<{ fullText: string; events: AssistantEvent[] }> {
+}): Promise<{ fullText: string; events: AssistantEvent[]; savedCitationIds: string[] }> {
     const {
         apiMessages, docStore, docIndex, userId, db, write, extraTools,
         workflowStore, tabularStore, buildCitations, model, apiKeys, projectId,
@@ -2627,8 +2627,8 @@ export async function runLLMStream(params: {
 
     const selectedModel = resolveModel(model, DEFAULT_MAIN_MODEL);
 
-    /** Accumulate MCP citations across all tool-call batches in this turn (Chunk 4). */
-    const allMcpCitations: import("./mcp/types.js").Citation[] = [];
+    /** Accumulate MCP citations across all tool-call batches in this turn (Chunk 4/20). */
+    let allMcpCitations: import("./mcp/types.js").Citation[] = [];
 
     await streamChatWithTools({
         model: selectedModel,
@@ -2785,8 +2785,42 @@ export async function runLLMStream(params: {
 
     flushText();
 
-    // Emit MCP citations SSE event (Chunk 4)
-    // Emit even if empty so the frontend always receives this event.
+    // Save MCP citations to DB and include IDs in the SSE event (Chunk 20).
+    // Portable DB sources (italaw, icsid) are auto-verified synchronously.
+    let savedCitationIds: string[] = [];
+    if (allMcpCitations.length > 0 && db) {
+        const PORTABLE_SOURCES = new Set(["italaw", "icsid"]);
+        const rows = allMcpCitations.map((c) => ({
+            user_id: c.user_id,
+            chat_message_id: null as string | null,
+            source_type: c.source_type,
+            source_id: c.source_id ?? null,
+            url: c.url,
+            title: c.title ?? null,
+            excerpt: c.excerpt ?? null,
+            liveness_status: c.liveness_status,
+            verification_status: PORTABLE_SOURCES.has(c.source_type) ? "verified" : "pending",
+            retrieved_at: c.retrieved_at ?? new Date().toISOString(),
+        }));
+        try {
+            const { data: inserted, error: insertError } = await db
+                .from("citations")
+                .upsert(rows, { onConflict: "user_id,source_type,source_id", ignoreDuplicates: false })
+                .select("id");
+            if (!insertError && inserted) {
+                savedCitationIds = inserted.map((r: { id: string }) => r.id);
+                allMcpCitations = allMcpCitations.map((c, i) => ({
+                    ...c,
+                    id: inserted[i]?.id ?? c.id,
+                    verification_status: rows[i].verification_status,
+                }));
+            }
+        } catch {
+            // Citation saving is best-effort — never crash the stream
+        }
+    }
+
+    // Emit MCP citations SSE event (Chunk 4/20 — includes IDs when citations were saved)
     write(`data: ${JSON.stringify({ type: "mcp_citations", citations: allMcpCitations })}\n\n`);
 
     // Parse and emit citations from <CITATIONS> block
@@ -2808,7 +2842,7 @@ export async function runLLMStream(params: {
     write(`data: ${JSON.stringify({ type: "citations", citations })}\n\n`);
     write("data: [DONE]\n\n");
 
-    return { fullText, events };
+    return { fullText, events, savedCitationIds };
 }
 
 // ---------------------------------------------------------------------------

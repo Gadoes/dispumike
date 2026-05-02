@@ -163,6 +163,9 @@ export interface MikeMessage {
 /** Liveness status of a cited URL. */
 export type McpCitationLiveness = "unchecked" | "live" | "unreachable";
 
+/** Verification status of a citation excerpt (Chunk 20). */
+export type McpCitationVerification = "pending" | "verified" | "unverified" | "unavailable";
+
 /**
  * A citation from an MCP legal database source.
  * Matches the `citations` table schema and the backend Citation type.
@@ -182,6 +185,8 @@ export interface McpCitation {
   displayName?: string;
   /** Region glyph (flag emoji or text) for the source. */
   regionGlyph?: string;
+  /** Excerpt verification status (Chunk 20). */
+  verification_status?: McpCitationVerification;
 }
 
 export interface CitationQuote {

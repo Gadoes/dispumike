@@ -158,7 +158,7 @@ projectChatRouter.post("/", requireAuth, async (req, res) => {
     try {
         write(`data: ${JSON.stringify({ type: "chat_id", chatId })}\n\n`);
 
-        const { fullText, events } = await runLLMStream({
+        const { fullText, events, savedCitationIds } = await runLLMStream({
             apiMessages,
             docStore,
             docIndex,
@@ -174,12 +174,20 @@ projectChatRouter.post("/", requireAuth, async (req, res) => {
         });
 
         const annotations = extractAnnotations(fullText, docIndex, events);
-        await db.from("chat_messages").insert({
+        const { data: messageData } = await db.from("chat_messages").insert({
             chat_id: chatId,
             role: "assistant",
             content: events.length ? events : null,
             annotations: annotations.length ? annotations : null,
-        });
+        }).select("id").single();
+
+        // Link saved MCP citations to the new chat message (Chunk 20)
+        if (savedCitationIds?.length && messageData?.id) {
+            await db
+                .from("citations")
+                .update({ chat_message_id: messageData.id })
+                .in("id", savedCitationIds);
+        }
 
         if (!chatTitle && lastUser?.content) {
             await db
