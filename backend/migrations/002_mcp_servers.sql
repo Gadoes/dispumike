@@ -13,7 +13,7 @@ create table if not exists public.mcp_servers (
   description                 text,
   region                      text not null,                  -- 'us' | 'eu' | 'gulf' | 'arbitration'
   country_code                text,                           -- 'US' | 'EU' | 'QA' | null (multi)
-  region_glyph                text,                           -- '🇺🇸' | 'EU·27' | 'ARB' | 'UN'
+  region_glyph                text,                           -- '🇺🇸' | '🇪🇺' | 'ARB' | 'UN'
   npm_package                 text,                           -- null for portable DB servers
   transport                   text not null default 'stdio',
   auth_type                   text not null default 'none',   -- 'none' | 'api_key'
@@ -37,7 +37,7 @@ values
   ('courtlistener',  'CourtListener', 'US federal and state court opinions via CourtListener.com', 'us', 'US', '🇺🇸', '@modelcontextprotocol/courtlistener', 'api_key', 'COURTLISTENER_API_KEY', 'courtlistener_api_key', false, 1, 10),
   ('govinfo',        'GovInfo',        'US federal legislative and regulatory documents via GovInfo.gov', 'us', 'US', '🇺🇸', '@modelcontextprotocol/govinfo', 'api_key', 'GOVINFO_API_KEY', 'govinfo_api_key', false, 1, 20),
   ('al-meezan',      'Al-Meezan',      'Qatari legislation and case law (Arabic/English)', 'gulf', 'QA', '🇶🇦', null, 'none', null, null, false, 1, 10),
-  ('eurlex',         'EUR-Lex',         'European Union law, regulations, and directives', 'eu', 'EU', 'EU·27', '@modelcontextprotocol/eurlex', 'none', null, null, false, 1, 10),
+  ('eurlex',         'EUR-Lex',         'European Union law, regulations, and directives', 'eu', 'EU', '🇪🇺', '@modelcontextprotocol/eurlex', 'none', null, null, false, 1, 10),
   ('italaw',         'italaw',          'International investment arbitration awards and documents', 'arbitration', null, 'ARB', null, 'none', null, null, false, 1, 10),
   ('icsid',          'ICSID',           'ICSID arbitration cases and awards (World Bank)', 'arbitration', null, 'ARB', null, 'none', null, null, false, 1, 20)
 on conflict (name) do nothing;

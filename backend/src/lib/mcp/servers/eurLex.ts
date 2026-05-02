@@ -5,7 +5,7 @@
  * Package: eur-lex-mcp (scimorph)
  *
  * No API key required — EUR-Lex is publicly accessible.
- * Region glyph: EU·27
+ * Region glyph: 🇪🇺
  *
  * TODO: replace mock with real package once confirmed available on npm.
  * When the package is not installed, McpClientManager will catch the spawn

@@ -16,3 +16,8 @@ next-env.d.ts
 .DS_Store
 .vercel
 coverage
+
+# Internal planning / AI tools
+.claude/
+data/
+docs/
