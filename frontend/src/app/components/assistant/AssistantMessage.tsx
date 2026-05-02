@@ -11,10 +11,12 @@ import { MikeIcon } from "@/components/chat/mike-icon";
 import { displayCitationQuote, formatCitationPage } from "../shared/types";
 import type {
     AssistantEvent,
+    McpCitation,
     MikeCitationAnnotation,
     MikeEditAnnotation,
 } from "../shared/types";
 import { EditCard, applyOptimisticResolution } from "./EditCard";
+import { CitationList } from "./CitationCard";
 import { PreResponseWrapper } from "../shared/PreResponseWrapper";
 import { supabase } from "@/lib/supabase";
 
@@ -1052,6 +1054,9 @@ interface Props {
      * edits flip their per-card UI without per-card clicks.
      */
     resolvedEditStatuses?: Record<string, "accepted" | "rejected">;
+    /** MCP source citations to render below the message content. */
+    mcpCitations?: McpCitation[];
+    onVerifyAndRead?: (citation: McpCitation) => void;
 }
 
 export function AssistantMessage({
@@ -1072,6 +1077,8 @@ export function AssistantMessage({
     isDocReloading,
     isEditReloading,
     resolvedEditStatuses,
+    mcpCitations,
+    onVerifyAndRead,
 }: Props) {
     const messageKey = useId();
     const contentDivRef = useRef<HTMLDivElement | null>(null);
@@ -1600,6 +1607,14 @@ export function AssistantMessage({
                             })}
                         </div>
                     )}
+
+                {/* MCP Source Citations */}
+                {mcpCitations && mcpCitations.length > 0 && (
+                    <CitationList
+                        citations={mcpCitations}
+                        onVerifyAndRead={onVerifyAndRead}
+                    />
+                )}
 
                 {/* Copy button */}
                 <div className="flex items-center gap-2 pt-2 pb-4 md:pb-8 font-sans justify-start">

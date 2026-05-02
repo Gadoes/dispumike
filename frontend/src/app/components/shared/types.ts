@@ -152,6 +152,36 @@ export interface MikeMessage {
   events?: AssistantEvent[];
   /** Set when streaming failed; rendered as a red error block. */
   error?: string;
+  /** MCP source citations (Chunk 4/5). */
+  mcpCitations?: McpCitation[];
+}
+
+// ---------------------------------------------------------------------------
+// MCP Source Citations (Chunk 4/5)
+// ---------------------------------------------------------------------------
+
+/** Liveness status of a cited URL. */
+export type McpCitationLiveness = "unchecked" | "live" | "unreachable";
+
+/**
+ * A citation from an MCP legal database source.
+ * Matches the `citations` table schema and the backend Citation type.
+ */
+export interface McpCitation {
+  id?: string;
+  user_id: string;
+  chat_message_id?: string | null;
+  source_type: string;  // 'courtlistener' | 'eurlex' | 'al-meezan' | 'govinfo' | 'italaw' | 'icsid'
+  source_id?: string | null;
+  url: string;
+  title?: string | null;
+  excerpt?: string | null;
+  liveness_status: McpCitationLiveness;
+  retrieved_at?: string;
+  /** Display name for the source (from mcp_servers.display_name). */
+  displayName?: string;
+  /** Region glyph (flag emoji or text) for the source. */
+  regionGlyph?: string;
 }
 
 export interface CitationQuote {
