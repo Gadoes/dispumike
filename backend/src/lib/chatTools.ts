@@ -2461,19 +2461,29 @@ export async function runLLMStream(params: {
      * If not provided, will attempt to use McpClientManager.getInstance().
      */
     mcpManager?: import("./mcp/clientManager.js").McpClientManager | null;
+    /**
+     * Per-query scope override from Chunk 8.
+     * When provided, only MCP servers whose name appears in this list are
+     * included in activeTools, regardless of connection-level `enabled` flag.
+     * A null/undefined value means "use all connected servers".
+     */
+    mcpScope?: string[] | null;
 }): Promise<{ fullText: string; events: AssistantEvent[] }> {
     const {
         apiMessages, docStore, docIndex, userId, db, write, extraTools,
         workflowStore, tabularStore, buildCitations, model, apiKeys, projectId,
-        mcpServerTools, openCircuitSources, mcpManager,
+        mcpServerTools, openCircuitSources, mcpManager, mcpScope,
     } = params;
 
     // Build the active tool list: standard tools + workflow tools + extra tools + MCP tools
     // MCP tools from open-circuit sources are excluded.
+    // mcpScope (Chunk 8): when provided, further restricts to only listed servers.
     const openCircuitSet = new Set(openCircuitSources ?? []);
+    const scopeSet = mcpScope && mcpScope.length > 0 ? new Set(mcpScope) : null;
     const activeMcpToolDefs: OpenAIToolSchema[] = [];
     for (const { serverName, tools } of mcpServerTools ?? []) {
         if (openCircuitSet.has(serverName)) continue; // circuit open — skip
+        if (scopeSet && !scopeSet.has(serverName)) continue; // out of per-query scope
         for (const tool of tools) {
             activeMcpToolDefs.push(mcpToolToOpenAI(serverName, tool));
         }
