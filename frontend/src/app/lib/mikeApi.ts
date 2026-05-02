@@ -815,3 +815,54 @@ export async function deleteWorkflowShare(
         method: "DELETE",
     });
 }
+
+// ---------------------------------------------------------------------------
+// MCP Source Connections
+// ---------------------------------------------------------------------------
+
+export interface McpServerRecord {
+    id: string;
+    name: string;
+    display_name: string;
+    description: string | null;
+    region: string;
+    country_code: string | null;
+    region_glyph: string | null;
+    auth_type: "none" | "api_key";
+    default_enabled: boolean;
+    tier: number;
+    sort_order: number;
+    connection: {
+        id: string;
+        enabled: boolean;
+        has_key: boolean;
+        key_version: number;
+        created_at: string;
+        updated_at: string;
+    } | null;
+}
+
+export async function listMcpConnections(): Promise<McpServerRecord[]> {
+    const result = await apiRequest<{ servers: McpServerRecord[] }>(
+        "/user/mcp-connections",
+    );
+    return result.servers;
+}
+
+export async function saveMcpConnection(payload: {
+    server_id: string;
+    enabled: boolean;
+    api_key?: string;
+}): Promise<void> {
+    await apiRequest("/user/mcp-connections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+}
+
+export async function deleteMcpConnection(serverId: string): Promise<void> {
+    await apiRequest(`/user/mcp-connections/${serverId}`, {
+        method: "DELETE",
+    });
+}

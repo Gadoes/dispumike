@@ -39,6 +39,10 @@ export type StreamCallbacks = {
 export type UserApiKeys = {
     claude?: string | null;
     gemini?: string | null;
+    /** CourtListener API key (from user_profiles or COURTLISTENER_API_KEY env). */
+    courtlistener?: string | null;
+    /** GovInfo API key (from user_profiles or GOVINFO_API_KEY env). */
+    govinfo?: string | null;
 };
 
 export type StreamChatParams = {

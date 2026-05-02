@@ -5,6 +5,7 @@ import {
     DEFAULT_TABULAR_MODEL,
     type UserApiKeys,
 } from "./llm";
+import { decryptApiKey } from "./mcp/encryption";
 
 export type UserModelSettings = {
     title_model: string;
@@ -52,11 +53,55 @@ export async function getUserApiKeys(
     const client = db ?? createServerSupabase();
     const { data } = await client
         .from("user_profiles")
-        .select("claude_api_key, gemini_api_key")
+        .select("claude_api_key, gemini_api_key, courtlistener_api_key, govinfo_api_key")
         .eq("user_id", userId)
         .single();
     return {
         claude: data?.claude_api_key ?? null,
         gemini: data?.gemini_api_key ?? null,
+        courtlistener: data?.courtlistener_api_key ?? process.env.COURTLISTENER_API_KEY ?? null,
+        govinfo: data?.govinfo_api_key ?? process.env.GOVINFO_API_KEY ?? null,
     };
+}
+
+/**
+ * Returns the decrypted API key for a given MCP server for a user.
+ * Falls back to env var if no user-specific key is stored.
+ * Returns null if neither is available.
+ */
+export async function getMcpApiKey(
+    userId: string,
+    serverName: string,
+    serverAuthEnvVar: string | null,
+    db?: ReturnType<typeof createServerSupabase>,
+): Promise<string | null> {
+    const client = db ?? createServerSupabase();
+
+    // Look up the mcp_connections row for this user + server
+    const { data: conn } = await client
+        .from("mcp_connections")
+        .select("api_key, key_version")
+        .eq("user_id", userId)
+        .eq("enabled", true)
+        .filter(
+            "server_id",
+            "in",
+            `(select id from mcp_servers where name = '${serverName}')`,
+        )
+        .maybeSingle();
+
+    if (conn?.api_key) {
+        try {
+            return await decryptApiKey(conn.api_key, conn.key_version ?? 1);
+        } catch (e) {
+            console.error(`[getMcpApiKey] decrypt failed for ${serverName}`, e);
+            // Fall through to env fallback
+        }
+    }
+
+    // Env var fallback
+    if (serverAuthEnvVar) {
+        return process.env[serverAuthEnvVar] ?? null;
+    }
+    return null;
 }
