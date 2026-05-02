@@ -21,6 +21,7 @@ import {
     type LlmMessage,
     type OpenAIToolSchema,
 } from "./llm";
+import type { McpToolDefinition } from "./mcp/types.js";
 
 const STANDARD_FONT_DATA_URL = (() => {
     try {
@@ -1484,6 +1485,44 @@ export type DocReplicatedResult = {
     }[];
 };
 
+/**
+ * Returns true if `toolName` follows the MCP prefix convention.
+ * Convention: mcp__{serverName}__{toolName}
+ */
+export function isMcpTool(toolName: string): boolean {
+    return toolName.startsWith("mcp__");
+}
+
+/**
+ * Parse `mcp__{serverName}__{toolName}` into components.
+ * Returns null if the name doesn't follow the convention.
+ */
+export function parseMcpToolName(toolName: string): { serverName: string; toolName: string } | null {
+    if (!isMcpTool(toolName)) return null;
+    const withoutPrefix = toolName.slice("mcp__".length);
+    const separatorIdx = withoutPrefix.indexOf("__");
+    if (separatorIdx < 0) return null;
+    return {
+        serverName: withoutPrefix.slice(0, separatorIdx),
+        toolName: withoutPrefix.slice(separatorIdx + 2),
+    };
+}
+
+/**
+ * Convert an McpToolDefinition (from listTools) to the OpenAI tool schema
+ * used by the LLM, using the mcp__{serverName}__{toolName} prefix.
+ */
+export function mcpToolToOpenAI(serverName: string, tool: McpToolDefinition): OpenAIToolSchema {
+    return {
+        type: "function",
+        function: {
+            name: `mcp__${serverName}__${tool.name}`,
+            description: tool.description,
+            parameters: tool.inputSchema as Record<string, unknown>,
+        },
+    };
+}
+
 export async function runToolCalls(
     toolCalls: ToolCall[],
     docStore: DocStore,
@@ -1495,6 +1534,8 @@ export async function runToolCalls(
     docIndex?: DocIndex,
     turnEditState?: TurnEditState,
     projectId?: string | null,
+    /** Optional McpClientManager for dispatching MCP tool calls. */
+    mcpManager?: import("./mcp/clientManager.js").McpClientManager | null,
 ): Promise<{
     toolResults: unknown[];
     docsRead: { filename: string; document_id?: string }[];
@@ -2195,6 +2236,72 @@ export async function runToolCalls(
                 tool_call_id: tc.id,
                 content: JSON.stringify(toolResultPayload),
             });
+        } else if (isMcpTool(tc.function.name)) {
+            // ---------------------------------------------------------------------------
+            // MCP tool dispatch — Chunk 3
+            // Naming convention: mcp__{serverName}__{toolName}
+            // ---------------------------------------------------------------------------
+            const parsed = parseMcpToolName(tc.function.name);
+            if (!parsed) {
+                toolResults.push({
+                    role: "tool",
+                    tool_call_id: tc.id,
+                    content: JSON.stringify({ error: `Invalid MCP tool name: ${tc.function.name}` }),
+                });
+            } else {
+                const { serverName, toolName: mcpTool } = parsed;
+
+                // Emit mcp_tool_call_start SSE event for UI feedback
+                write(
+                    `data: ${JSON.stringify({
+                        type: "mcp_tool_call_start",
+                        source: serverName,
+                        tool: mcpTool,
+                        query: args.query ?? args.q ?? null,
+                    })}\n\n`,
+                );
+
+                try {
+                    let resolvedManager = mcpManager ?? null;
+                    if (!resolvedManager) {
+                        try {
+                            const { McpClientManager } = await import("./mcp/clientManager.js");
+                            resolvedManager = McpClientManager.getInstance();
+                        } catch {
+                            resolvedManager = null;
+                        }
+                    }
+
+                    if (!resolvedManager) {
+                        toolResults.push({
+                            role: "tool",
+                            tool_call_id: tc.id,
+                            content: JSON.stringify({
+                                error: "source_unavailable",
+                                source: serverName,
+                                reason: "McpClientManager not initialized",
+                            }),
+                        });
+                    } else {
+                        const mcpResult = await resolvedManager.callTool(serverName, mcpTool, args);
+                        toolResults.push({
+                            role: "tool",
+                            tool_call_id: tc.id,
+                            content: JSON.stringify(mcpResult),
+                        });
+                    }
+                } catch (err) {
+                    toolResults.push({
+                        role: "tool",
+                        tool_call_id: tc.id,
+                        content: JSON.stringify({
+                            error: "source_unavailable",
+                            source: serverName,
+                            reason: err instanceof Error ? err.message : String(err),
+                        }),
+                    });
+                }
+            }
         }
     }
 
@@ -2312,17 +2419,81 @@ export async function runLLMStream(params: {
      * generated docs still get persisted, but as standalone documents.
      */
     projectId?: string | null;
+    /**
+     * MCP tool definitions from connected servers (Chunk 3).
+     * These are appended to activeTools after existing TOOLS.
+     * Format: { serverName, tools: McpToolDefinition[] }[]
+     */
+    mcpServerTools?: Array<{ serverName: string; tools: McpToolDefinition[]; displayName?: string }>;
+    /**
+     * Sources whose circuit breaker is open (Chunk 18).
+     * Their tools are excluded from activeTools, and a note is appended to the system prompt.
+     */
+    openCircuitSources?: string[];
+    /**
+     * Optional McpClientManager instance for dispatching MCP tool calls.
+     * If not provided, will attempt to use McpClientManager.getInstance().
+     */
+    mcpManager?: import("./mcp/clientManager.js").McpClientManager | null;
 }): Promise<{ fullText: string; events: AssistantEvent[] }> {
-    const { apiMessages, docStore, docIndex, userId, db, write, extraTools, workflowStore, tabularStore, buildCitations, model, apiKeys, projectId } = params;
-    const activeTools = extraTools?.length
-        ? [...TOOLS, ...WORKFLOW_TOOLS, ...extraTools]
-        : [...TOOLS, ...WORKFLOW_TOOLS];
+    const {
+        apiMessages, docStore, docIndex, userId, db, write, extraTools,
+        workflowStore, tabularStore, buildCitations, model, apiKeys, projectId,
+        mcpServerTools, openCircuitSources, mcpManager,
+    } = params;
+
+    // Build the active tool list: standard tools + workflow tools + extra tools + MCP tools
+    // MCP tools from open-circuit sources are excluded.
+    const openCircuitSet = new Set(openCircuitSources ?? []);
+    const activeMcpToolDefs: OpenAIToolSchema[] = [];
+    for (const { serverName, tools } of mcpServerTools ?? []) {
+        if (openCircuitSet.has(serverName)) continue; // circuit open — skip
+        for (const tool of tools) {
+            activeMcpToolDefs.push(mcpToolToOpenAI(serverName, tool));
+        }
+    }
+
+    const activeTools = [
+        ...TOOLS,
+        ...WORKFLOW_TOOLS,
+        ...(extraTools ?? []),
+        ...activeMcpToolDefs,
+    ];
 
     // Extract system prompt; pass remaining turns to the adapter as
     // plain user/assistant messages.
     const rawMsgs = apiMessages as { role: string; content: string | null }[];
-    const systemPrompt =
+    let systemPrompt =
         rawMsgs[0]?.role === "system" ? (rawMsgs[0].content ?? "") : "";
+
+    // Add MCP source descriptions to system prompt (Chunk 3)
+    if (activeMcpToolDefs.length > 0 && mcpServerTools) {
+        const activeServerNames = new Set(
+            activeMcpToolDefs.map((t) => {
+                const parsed = parseMcpToolName((t as { function: { name: string } }).function.name);
+                return parsed?.serverName;
+            }).filter(Boolean)
+        );
+        const serverDescriptions = mcpServerTools
+            .filter(({ serverName }) => activeServerNames.has(serverName))
+            .map(({ serverName, displayName, tools }) =>
+                `- ${displayName ?? serverName}: ${tools.map((t) => `mcp__${serverName}__${t.name}`).join(", ")}`
+            )
+            .join("\n");
+        if (serverDescriptions) {
+            systemPrompt += `\n\nACTIVE LEGAL DATABASE SOURCES:\nThe following MCP sources are available for this query. Use their tools to retrieve legal citations when relevant:\n${serverDescriptions}`;
+        }
+    }
+
+    // Append unavailability notes for open-circuit sources (Chunk 18)
+    if (openCircuitSources?.length && mcpServerTools) {
+        for (const src of openCircuitSources) {
+            const serverInfo = mcpServerTools.find((s) => s.serverName === src);
+            const displayName = serverInfo?.displayName ?? src;
+            systemPrompt += `\n\nNote: ${displayName} is temporarily unavailable. Do not attempt to call its tools.`;
+        }
+    }
+
     console.log(
         "[runLLMStream] system prompt:\n" +
             "─".repeat(80) +
@@ -2483,6 +2654,7 @@ export async function runLLMStream(params: {
                     docIndex,
                     turnEditState,
                     projectId,
+                    mcpManager ?? null,
                 );
             for (const r of docsRead) {
                 events.push({
