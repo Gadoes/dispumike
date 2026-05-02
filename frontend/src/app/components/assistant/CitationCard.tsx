@@ -12,7 +12,7 @@
  */
 
 import { useState } from "react";
-import type { McpCitation, McpCitationLiveness } from "@/app/components/shared/types";
+import type { McpCitation, McpCitationLiveness, McpCitationVerification } from "@/app/components/shared/types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,7 +37,7 @@ const SOURCE_DISPLAY_NAMES: Record<string, string> = {
 const SOURCE_REGION_GLYPHS: Record<string, string> = {
     courtlistener: "🇺🇸",
     govinfo: "🇺🇸",
-    eurlex: "EU·27",
+    eurlex: "🇪🇺",
     "al-meezan": "🇶🇦",
     italaw: "ARB",
     icsid: "ARB",
@@ -80,6 +80,33 @@ function LivenessDot({ status }: LivenessDotProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Verification badge
+// ---------------------------------------------------------------------------
+
+interface VerificationBadgeProps {
+    status: McpCitationVerification;
+}
+
+function VerificationBadge({ status }: VerificationBadgeProps) {
+    const config: Record<McpCitationVerification, { color: string; title: string; label: string }> = {
+        pending:     { color: "bg-yellow-400", title: "Verification pending",    label: "?" },
+        verified:    { color: "bg-green-500",  title: "Excerpt verified",        label: "✓" },
+        unverified:  { color: "bg-red-500",    title: "Excerpt not found",       label: "✗" },
+        unavailable: { color: "bg-gray-400",   title: "Verification unavailable", label: "-" },
+    };
+    const { color, title, label } = config[status];
+    return (
+        <span
+            className={`inline-flex items-center justify-center h-4 w-4 rounded-full ${color} text-white text-xs font-bold flex-shrink-0`}
+            title={title}
+            aria-label={title}
+        >
+            {label}
+        </span>
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Single expanded citation card
 // ---------------------------------------------------------------------------
 
@@ -92,6 +119,27 @@ function SingleCitationCard({ citation, onVerifyAndRead }: SingleCitationCardPro
     const displayName = getDisplayName(citation);
     const regionGlyph = getRegionGlyph(citation);
     const isArabic = citation.excerpt ? containsArabic(citation.excerpt) : false;
+    const [verificationStatus, setVerificationStatus] = useState<McpCitationVerification | undefined>(
+        citation.verification_status
+    );
+    const [verifying, setVerifying] = useState(false);
+
+    async function handleVerify() {
+        if (!citation.id) return;
+        setVerifying(true);
+        onVerifyAndRead?.(citation);
+        try {
+            const res = await fetch(`/api/citations/${citation.id}/verify`, { method: "POST" });
+            if (res.ok) {
+                const data = await res.json() as { verification_status: McpCitationVerification };
+                setVerificationStatus(data.verification_status);
+            }
+        } catch {
+            // best-effort — network errors don't crash the UI
+        } finally {
+            setVerifying(false);
+        }
+    }
 
     return (
         <div className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm text-sm">
@@ -99,6 +147,7 @@ function SingleCitationCard({ citation, onVerifyAndRead }: SingleCitationCardPro
             <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="flex items-center gap-1.5 min-w-0">
                     <LivenessDot status={citation.liveness_status} />
+                    {verificationStatus && <VerificationBadge status={verificationStatus} />}
                     <span className="font-semibold text-gray-900 truncate">
                         {citation.title ?? "Untitled"}
                     </span>
@@ -130,13 +179,15 @@ function SingleCitationCard({ citation, onVerifyAndRead }: SingleCitationCardPro
                 >
                     Open source ↗
                 </a>
-                {/* Verify and read — stub until Chunk 20 */}
-                <button
-                    className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-2 py-0.5 rounded"
-                    onClick={() => onVerifyAndRead?.(citation)}
-                >
-                    Verify &amp; read
-                </button>
+                {citation.id && (
+                    <button
+                        className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-2 py-0.5 rounded"
+                        onClick={handleVerify}
+                        disabled={verifying}
+                    >
+                        Verify &amp; read
+                    </button>
+                )}
             </div>
         </div>
     );
@@ -157,6 +208,27 @@ function CompactRow({ citation, isExpanded, onToggle, onVerifyAndRead }: Compact
     const displayName = getDisplayName(citation);
     const regionGlyph = getRegionGlyph(citation);
     const isArabic = citation.excerpt ? containsArabic(citation.excerpt) : false;
+    const [verificationStatus, setVerificationStatus] = useState<McpCitationVerification | undefined>(
+        citation.verification_status
+    );
+    const [verifying, setVerifying] = useState(false);
+
+    async function handleVerify() {
+        if (!citation.id) return;
+        setVerifying(true);
+        onVerifyAndRead?.(citation);
+        try {
+            const res = await fetch(`/api/citations/${citation.id}/verify`, { method: "POST" });
+            if (res.ok) {
+                const data = await res.json() as { verification_status: McpCitationVerification };
+                setVerificationStatus(data.verification_status);
+            }
+        } catch {
+            // best-effort — network errors don't crash the UI
+        } finally {
+            setVerifying(false);
+        }
+    }
 
     return (
         <div className="border-b border-gray-100 last:border-0">
@@ -167,6 +239,7 @@ function CompactRow({ citation, isExpanded, onToggle, onVerifyAndRead }: Compact
                 aria-expanded={isExpanded}
             >
                 <LivenessDot status={citation.liveness_status} />
+                {verificationStatus && <VerificationBadge status={verificationStatus} />}
                 <span className="flex-1 text-sm text-gray-900 truncate">
                     {citation.title ?? "Untitled"}
                 </span>
@@ -197,12 +270,15 @@ function CompactRow({ citation, isExpanded, onToggle, onVerifyAndRead }: Compact
                         >
                             Open source ↗
                         </a>
-                        <button
-                            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-2 py-0.5 rounded"
-                            onClick={() => onVerifyAndRead?.(citation)}
-                        >
-                            Verify &amp; read
-                        </button>
+                        {citation.id && (
+                            <button
+                                className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-2 py-0.5 rounded"
+                                onClick={handleVerify}
+                                disabled={verifying}
+                            >
+                                Verify &amp; read
+                            </button>
+                        )}
                     </div>
                 </div>
             )}
