@@ -3,8 +3,8 @@
  * Spec: Section 5, Chunk 5.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { CitationList } from "./CitationCard";
 import type { McpCitation } from "../shared/types";
 
@@ -14,6 +14,7 @@ import type { McpCitation } from "../shared/types";
 
 function makeCitation(overrides: Partial<McpCitation> = {}): McpCitation {
     return {
+        id: "cite-default",
         user_id: "user-1",
         source_type: "courtlistener",
         url: "https://www.courtlistener.com/opinion/123/smith-v-jones/",
@@ -59,7 +60,7 @@ describe("CitationList — single card view (≤3 citations)", () => {
             }),
         ];
         render(<CitationList citations={citations} />);
-        expect(screen.getByText("EU·27")).toBeInTheDocument();
+        expect(screen.getByText("🇪🇺")).toBeInTheDocument();
     });
 
     it("'Open source' link has target=_blank and correct href", () => {
@@ -263,5 +264,88 @@ describe("CitationList — compact list view (≥4 citations)", () => {
         fireEvent.click(rowButtons[0]);
         const p = screen.getByText(arabicExcerpt);
         expect(p).toHaveAttribute("dir", "rtl");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Verification badge (Chunk 20)
+// ---------------------------------------------------------------------------
+
+describe("CitationList — verification badge", () => {
+    const mockFetch = vi.fn();
+
+    beforeEach(() => {
+        vi.stubGlobal("fetch", mockFetch);
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it("renders 'pending' badge when verification_status is pending", () => {
+        const citations = [makeCitation({ id: "cite-1", verification_status: "pending" })];
+        render(<CitationList citations={citations} />);
+        expect(screen.getByTitle("Verification pending")).toBeInTheDocument();
+    });
+
+    it("renders verified badge when verification_status is verified", () => {
+        const citations = [makeCitation({ id: "cite-1", verification_status: "verified" })];
+        render(<CitationList citations={citations} />);
+        expect(screen.getByTitle("Excerpt verified")).toBeInTheDocument();
+    });
+
+    it("renders unverified badge when verification_status is unverified", () => {
+        const citations = [makeCitation({ id: "cite-1", verification_status: "unverified" })];
+        render(<CitationList citations={citations} />);
+        expect(screen.getByTitle("Excerpt not found")).toBeInTheDocument();
+    });
+
+    it("renders unavailable badge when verification_status is unavailable", () => {
+        const citations = [makeCitation({ id: "cite-1", verification_status: "unavailable" })];
+        render(<CitationList citations={citations} />);
+        expect(screen.getByTitle("Verification unavailable")).toBeInTheDocument();
+    });
+
+    it("clicking 'Verify & read' calls API and updates badge to verified", async () => {
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ id: "cite-1", verification_status: "verified" }),
+        });
+
+        const citations = [makeCitation({ id: "cite-1", verification_status: "pending" })];
+        render(<CitationList citations={citations} />);
+
+        fireEvent.click(screen.getByRole("button", { name: /verify.*read/i }));
+
+        await waitFor(() => {
+            expect(screen.getByTitle("Excerpt verified")).toBeInTheDocument();
+        });
+
+        expect(mockFetch).toHaveBeenCalledWith(
+            expect.stringContaining("/citations/cite-1/verify"),
+            expect.objectContaining({ method: "POST" }),
+        );
+    });
+
+    it("clicking 'Verify & read' updates badge to unverified when excerpt not found", async () => {
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ id: "cite-1", verification_status: "unverified" }),
+        });
+
+        const citations = [makeCitation({ id: "cite-1", verification_status: "pending" })];
+        render(<CitationList citations={citations} />);
+
+        fireEvent.click(screen.getByRole("button", { name: /verify.*read/i }));
+
+        await waitFor(() => {
+            expect(screen.getByTitle("Excerpt not found")).toBeInTheDocument();
+        });
+    });
+
+    it("does not show 'Verify & read' button when citation has no id", () => {
+        const citations = [makeCitation({ id: undefined })];
+        render(<CitationList citations={citations} />);
+        expect(screen.queryByRole("button", { name: /verify.*read/i })).not.toBeInTheDocument();
     });
 });

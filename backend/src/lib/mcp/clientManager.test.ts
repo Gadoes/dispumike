@@ -254,4 +254,144 @@ describe("McpClientManager", () => {
     const mgr = await makeManager();
     await expect(mgr.listTools("nonexistent")).rejects.toThrow('Unknown MCP server: "nonexistent"');
   });
+
+  // -------------------------------------------------------------------------
+  // Chunk 18: circuit breaker integration tests
+  // -------------------------------------------------------------------------
+
+  it("circuit open: returns source_unavailable immediately without calling MCP", async () => {
+    const mgr = await makeManager();
+
+    // Warm server first so it's reachable
+    await mgr.listTools("testserver");
+
+    // Make callTool fail so we can trip the circuit (3 failures).
+    // Advance only 600ms per call — enough for the 500ms withRetry backoff
+    // but well under the 15-min idle TTL (which would evict failures from the circuit window).
+    mockCallTool.mockRejectedValue(new Error("tool error"));
+    for (let i = 0; i < 3; i++) {
+      const p = mgr.callTool("testserver", "list_directory", {});
+      await vi.advanceTimersByTimeAsync(600);
+      await p;
+    }
+
+    // Circuit should now be open — reset mock so if MCP is called it would succeed
+    mockCallTool.mockResolvedValue(TOOL_RESULT);
+    const callCountBefore = mockCallTool.mock.calls.length;
+
+    const result = await mgr.callTool("testserver", "list_directory", {});
+    expect(result).toMatchObject({ error: "source_unavailable", source: "testserver", reason: "circuit_open" });
+    // MCP was NOT called after circuit opened
+    expect(mockCallTool.mock.calls.length).toBe(callCountBefore);
+  });
+
+  it("3 MCP tool failures trip the circuit breaker", async () => {
+    const mgr = await makeManager();
+
+    await mgr.listTools("testserver"); // warm server
+    mockCallTool.mockRejectedValue(new Error("flaky"));
+
+    // Run 3 sequential failures; advance only through withRetry backoff (500ms),
+    // not the idle TTL, to keep failures inside the circuit breaker's 60s window.
+    for (let i = 0; i < 3; i++) {
+      const p = mgr.callTool("testserver", "list_directory", {});
+      await vi.advanceTimersByTimeAsync(600);
+      const r = await p;
+      expect(r).toMatchObject({ error: "source_unavailable", source: "testserver" });
+    }
+
+    // Next call should be rejected by open circuit (no MCP call)
+    mockCallTool.mockResolvedValue(TOOL_RESULT);
+    const next = await mgr.callTool("testserver", "list_directory", {});
+    expect(next).toMatchObject({ error: "source_unavailable", reason: "circuit_open" });
+  });
+
+  it("getOpenCircuitSources returns open circuit names", async () => {
+    const mgr = await makeManager();
+    await mgr.listTools("testserver");
+
+    // Initially no open circuits
+    expect(mgr.getOpenCircuitSources()).toEqual([]);
+
+    // Trip the circuit (3 failures), advancing only through retry backoff
+    mockCallTool.mockRejectedValue(new Error("down"));
+    for (let i = 0; i < 3; i++) {
+      const p = mgr.callTool("testserver", "list_directory", {});
+      await vi.advanceTimersByTimeAsync(600);
+      await p;
+    }
+
+    expect(mgr.getOpenCircuitSources()).toContain("testserver");
+  });
+
+  // -------------------------------------------------------------------------
+  // Chunk 19: telemetry logging tests
+  // -------------------------------------------------------------------------
+
+  describe("telemetry logging", () => {
+    let mockInsert: ReturnType<typeof vi.fn>;
+    let mockFrom: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      mockInsert = vi.fn().mockResolvedValue({ error: null });
+      mockFrom = vi.fn().mockReturnValue({ insert: mockInsert });
+    });
+
+    it("logs a success row after a successful callTool", async () => {
+      const mgr = await makeManager();
+      await mgr.listTools("testserver"); // warm
+
+      mockCallTool.mockResolvedValue(TOOL_RESULT);
+
+      await mgr.callTool("testserver", "list_directory", {}, {
+        userId: "user-1",
+        cacheHit: false,
+        db: { from: mockFrom } as unknown as import("./clientManager.js").TelemetryDb,  // narrowed interface
+      });
+
+      expect(mockFrom).toHaveBeenCalledWith("mcp_events");
+      const insertArg = mockInsert.mock.calls[0][0];
+      expect(insertArg).toMatchObject({
+        user_id: "user-1",
+        source: "testserver",
+        tool: "list_directory",
+        cache_hit: false,
+        success: true,
+      });
+      expect(typeof insertArg.latency_ms).toBe("number");
+    });
+
+    it("logs a failure row after a failed callTool", async () => {
+      const mgr = await makeManager();
+      await mgr.listTools("testserver"); // warm
+
+      mockCallTool.mockRejectedValue(new Error("tool failed"));
+
+      const p = mgr.callTool("testserver", "list_directory", {}, {
+        userId: "user-2",
+        cacheHit: false,
+        db: { from: mockFrom } as unknown as import("./clientManager.js").TelemetryDb,
+      });
+      await vi.advanceTimersByTimeAsync(600); // exhaust withRetry backoff
+      await p;
+
+      expect(mockFrom).toHaveBeenCalledWith("mcp_events");
+      const insertArg = mockInsert.mock.calls[0][0];
+      expect(insertArg).toMatchObject({
+        user_id: "user-2",
+        source: "testserver",
+        success: false,
+      });
+      expect(typeof insertArg.error_type).toBe("string");
+    });
+
+    it("skips DB logging when no db is provided", async () => {
+      const mgr = await makeManager();
+      await mgr.listTools("testserver");
+      mockCallTool.mockResolvedValue(TOOL_RESULT);
+
+      // Should not throw even with no db option
+      await expect(mgr.callTool("testserver", "list_directory", {})).resolves.not.toThrow();
+    });
+  });
 });

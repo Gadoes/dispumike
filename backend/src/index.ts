@@ -10,6 +10,8 @@ import { workflowsRouter } from "./routes/workflows";
 import { userRouter } from "./routes/user";
 import { downloadsRouter } from "./routes/downloads";
 import { mcpConnectionsRouter } from "./routes/mcpConnections";
+import { adminRouter } from "./routes/admin";
+import { citationsRouter } from "./routes/citations";
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -33,6 +35,8 @@ app.use("/user", userRouter);
 app.use("/users", userRouter);
 app.use("/download", downloadsRouter);
 app.use("/user/mcp-connections", mcpConnectionsRouter);
+app.use("/admin", adminRouter);
+app.use("/citations", citationsRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
