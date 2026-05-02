@@ -73,3 +73,56 @@ export interface McpHealthResult {
   status: McpServerStatus;
   error?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Citation types — Chunk 4
+// ---------------------------------------------------------------------------
+
+/**
+ * Liveness status for a citation URL.
+ * 'verified' and 'unverified' are reserved for the hallucination council
+ * (Feature 2 of roadmap) and must NOT be used here.
+ */
+export type CitationLivenessStatus = "unchecked" | "live" | "unreachable";
+
+/** Valid source types for MCP citations. */
+export type CitationSourceType =
+  | "courtlistener"
+  | "eurlex"
+  | "al-meezan"
+  | "govinfo"
+  | "italaw"
+  | "icsid";
+
+/**
+ * A citation from an MCP tool result.
+ * Matches the `citations` Supabase table schema (Section 3).
+ */
+export interface Citation {
+  /** DB row UUID — present after storage. */
+  id?: string;
+  /** User who performed the query. */
+  user_id: string;
+  /** chat_messages row this citation is linked to. */
+  chat_message_id?: string | null;
+  /** Source identifier (e.g. 'courtlistener'). */
+  source_type: CitationSourceType;
+  /** Canonical ID in the source (e.g. CL opinion ID, CELEX number). */
+  source_id?: string | null;
+  /** URL to the source document. */
+  url: string;
+  /** Display title of the cited document. */
+  title?: string | null;
+  /** Verbatim excerpt ≤500 chars. */
+  excerpt?: string | null;
+  /** Liveness check status. Default: 'unchecked'. */
+  liveness_status: CitationLivenessStatus;
+  /** When the citation was retrieved. */
+  retrieved_at?: string;
+}
+
+/**
+ * Raw MCP tool result for a single result entry (shape varies by source type).
+ * Parsers map this to a Citation.
+ */
+export type RawMcpResult = Record<string, unknown>;
