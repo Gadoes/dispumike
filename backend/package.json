@@ -9,7 +9,8 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "scrape:italaw": "tsx scripts/scrape-italaw.ts"
+    "scrape:italaw": "tsx scripts/scrape-italaw.ts",
+    "scrape:icsid": "tsx scripts/scrape-icsid.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
