@@ -1,0 +1,37 @@
+{
+  "_fixture_recorded_at": "2025-01-15T00:00:00Z",
+  "_fixture_source": "GovInfo / U.S. Government Publishing Office",
+  "_fixture_attribution": "Public domain U.S. government documents.",
+  "results": [
+    {
+      "packageId": "CFR-2024-title40-vol1",
+      "title": "Protection of Environment: Clean Air Act Regulations",
+      "url": "https://www.govinfo.gov/content/pkg/CFR-2024-title40-vol1/pdf/CFR-2024-title40-vol1.pdf",
+      "excerpt": "Standards for National Ambient Air Quality and permitting requirements for stationary sources under the Clean Air Act.",
+      "dateIssued": "2024-01-01",
+      "collectionCode": "CFR",
+      "publisher": "Office of the Federal Register"
+    },
+    {
+      "packageId": "FR-2023-12-15",
+      "title": "Federal Register Vol. 88, No. 239 — EPA Final Rule on PFAS Reporting",
+      "url": "https://www.govinfo.gov/content/pkg/FR-2023-12-15/pdf/2023-26813.pdf",
+      "excerpt": "The Environmental Protection Agency promulgates final rule requiring manufacturers to report PFAS data under TSCA section 8(a)(7).",
+      "dateIssued": "2023-12-15",
+      "collectionCode": "FR",
+      "publisher": "Environmental Protection Agency"
+    },
+    {
+      "packageId": "PLAW-117publ58",
+      "title": "Infrastructure Investment and Jobs Act (Pub. L. 117-58)",
+      "url": "https://www.govinfo.gov/content/pkg/PLAW-117publ58/pdf/PLAW-117publ58.pdf",
+      "excerpt": "Authorizes federal funding for broadband infrastructure, roads, bridges, rail, and water systems through fiscal year 2026.",
+      "dateIssued": "2021-11-15",
+      "collectionCode": "PLAW",
+      "publisher": "U.S. Congress"
+    }
+  ],
+  "count": 3,
+  "next": null,
+  "previous": null
+}
