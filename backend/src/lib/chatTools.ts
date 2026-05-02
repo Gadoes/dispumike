@@ -2287,13 +2287,24 @@ export async function runToolCalls(
                             }),
                         });
                     } else {
-                        const mcpResult = await resolvedManager.callTool(serverName, mcpTool, args);
+                        const mcpResult = await resolvedManager.callTool(serverName, mcpTool, args, { userId, db });
                         const mcpResultStr = JSON.stringify(mcpResult);
                         toolResults.push({
                             role: "tool",
                             tool_call_id: tc.id,
                             content: mcpResultStr,
                         });
+
+                        // Emit source_unavailable SSE event when circuit is open (Chunk 18)
+                        if ("error" in mcpResult && mcpResult.error === "source_unavailable") {
+                            write(
+                                `data: ${JSON.stringify({
+                                    type: "source_unavailable",
+                                    source: serverName,
+                                    message: `${serverName} is temporarily unavailable`,
+                                })}\n\n`,
+                            );
+                        }
 
                         // Extract citations from successful MCP results (Chunk 4)
                         // Only parse if the result is not an error

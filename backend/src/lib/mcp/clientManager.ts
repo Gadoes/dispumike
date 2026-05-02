@@ -2,6 +2,7 @@
  * McpClientManager — singleton that manages stdio child-process MCP servers.
  *
  * Spec: Section 5, Chunk 1 (Lazy-spawn, idle TTL, queue, reconnect, dispose).
+ * Chunk 18: each callTool() is wrapped with retry + per-source circuit breaker.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -17,6 +18,13 @@ import type {
   McpCallResult,
   McpHealthResult,
 } from "./types.js";
+import { CircuitBreaker, withRetry } from "./circuitBreaker.js";
+
+// Minimal interface — avoids importing the full SupabaseClient type which
+// is only needed for telemetry logging and shouldn't couple this module to it.
+export interface TelemetryDb {
+  from(table: string): { insert(row: Record<string, unknown>): PromiseLike<unknown> };
+}
 
 /** Max queued requests per server before rejecting with "throttled". */
 const MAX_QUEUE_DEPTH = 10;
@@ -34,6 +42,7 @@ export class McpClientManager {
   private static instance: McpClientManager | null = null;
 
   private servers: Map<string, McpServerState> = new Map();
+  private circuits: Map<string, CircuitBreaker> = new Map();
 
   private constructor(configs: McpServerConfig[]) {
     for (const config of configs) {
@@ -46,6 +55,7 @@ export class McpClientManager {
         idleTimer: null,
         queueDepth: 0,
       });
+      this.circuits.set(config.name, new CircuitBreaker());
     }
   }
 
@@ -95,15 +105,30 @@ export class McpClientManager {
   async callTool(
     serverName: string,
     toolName: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
+    options?: { userId?: string; cacheHit?: boolean; db?: TelemetryDb }
   ): Promise<McpCallResult> {
     const state = this.requireState(serverName);
+    const circuit = this.circuits.get(serverName)!;
+    const { userId, cacheHit = false, db } = options ?? {};
+    const startTime = Date.now();
 
     if (state.status === "permanently_failed") {
+      void this.logEvent({ db, userId, source: serverName, tool: toolName,
+        latencyMs: Date.now() - startTime, cacheHit, success: false, errorType: "permanently_failed" });
       return this.unavailableError(serverName, "permanently_failed");
     }
 
+    // Reject immediately if circuit is open (no MCP call attempted)
+    if (circuit.isOpen()) {
+      void this.logEvent({ db, userId, source: serverName, tool: toolName,
+        latencyMs: Date.now() - startTime, cacheHit, success: false, errorType: "circuit_open" });
+      return this.unavailableError(serverName, "circuit_open");
+    }
+
     if (state.queueDepth >= MAX_QUEUE_DEPTH) {
+      void this.logEvent({ db, userId, source: serverName, tool: toolName,
+        latencyMs: Date.now() - startTime, cacheHit, success: false, errorType: "throttled" });
       return this.throttledError(serverName);
     }
 
@@ -112,7 +137,10 @@ export class McpClientManager {
       await this.ensureWarm(serverName);
     } catch (err) {
       state.queueDepth -= 1;
-      // Re-read status — may have changed to permanently_failed inside ensureWarm
+      circuit.recordFailure();
+      void this.logEvent({ db, userId, source: serverName, tool: toolName,
+        latencyMs: Date.now() - startTime, cacheHit, success: false,
+        errorType: err instanceof Error ? err.message : String(err) });
       const currentStatus = (state as McpServerState).status;
       if (currentStatus === "permanently_failed") {
         return this.unavailableError(serverName, "permanently_failed");
@@ -121,11 +149,35 @@ export class McpClientManager {
     }
     try {
       this.resetIdleTimer(serverName);
-      const raw = await state.client!.callTool({ name: toolName, arguments: args });
+      const raw = await withRetry(
+        () => state.client!.callTool({ name: toolName, arguments: args }),
+        { attempts: 2, backoffs: [500, 1000] },
+      );
+      circuit.recordSuccess();
+      void this.logEvent({ db, userId, source: serverName, tool: toolName,
+        latencyMs: Date.now() - startTime, cacheHit, success: true });
       return raw as McpToolResult;
+    } catch (err) {
+      circuit.recordFailure();
+      void this.logEvent({ db, userId, source: serverName, tool: toolName,
+        latencyMs: Date.now() - startTime, cacheHit, success: false,
+        errorType: err instanceof Error ? err.message : String(err) });
+      return this.unavailableError(
+        serverName,
+        err instanceof Error ? err.message : String(err),
+      );
     } finally {
       state.queueDepth -= 1;
     }
+  }
+
+  /** Returns the names of servers whose circuit breaker is currently open. */
+  getOpenCircuitSources(): string[] {
+    const open: string[] = [];
+    for (const [name, cb] of this.circuits) {
+      if (cb.isOpen()) open.push(name);
+    }
+    return open;
   }
 
   /** Ping the server to check health. Spawns it if cold. */
@@ -307,6 +359,36 @@ export class McpClientManager {
     // Only reset status if not permanently failed
     if (state.status !== "permanently_failed") {
       state.status = "cold";
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Telemetry helper
+  // ---------------------------------------------------------------------------
+
+  private async logEvent(opts: {
+    db?: TelemetryDb;
+    userId?: string;
+    source: string;
+    tool: string;
+    latencyMs: number;
+    cacheHit: boolean;
+    success: boolean;
+    errorType?: string;
+  }): Promise<void> {
+    if (!opts.db) return;
+    try {
+      await opts.db.from("mcp_events").insert({
+        user_id: opts.userId ?? null,
+        source: opts.source,
+        tool: opts.tool,
+        latency_ms: opts.latencyMs,
+        cache_hit: opts.cacheHit,
+        success: opts.success,
+        error_type: opts.errorType ?? null,
+      });
+    } catch {
+      // Telemetry must never crash the caller
     }
   }
 
