@@ -7,6 +7,7 @@ import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
 import { useGenerateChatTitle } from "./useGenerateChatTitle";
 import type {
     AssistantEvent,
+    McpCitation,
     MikeCitationAnnotation,
     MikeMessage,
 } from "@/app/components/shared/types";
@@ -753,6 +754,23 @@ export function useAssistantChat({
                                 }),
                             );
                             pushThinkingPlaceholder();
+                            continue;
+                        }
+
+                        if (data.type === "mcp_citations") {
+                            // MCP source citations from legal database sources (Chunk 5)
+                            const incoming = (data.citations ?? []) as McpCitation[];
+                            setMessages((prev) => {
+                                const updated = [...prev];
+                                const last = updated[updated.length - 1];
+                                if (last?.role === "assistant") {
+                                    updated[updated.length - 1] = {
+                                        ...last,
+                                        mcpCitations: incoming,
+                                    };
+                                }
+                                return updated;
+                            });
                             continue;
                         }
 
