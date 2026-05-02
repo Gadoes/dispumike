@@ -1,0 +1,37 @@
+{
+  "_fixture_recorded_at": "2025-01-15T00:00:00Z",
+  "_fixture_source": "CourtListener / Free Law Project",
+  "_fixture_attribution": "Data from CourtListener / Free Law Project. Public domain.",
+  "results": [
+    {
+      "id": 12345,
+      "case_name": "Smith v. Jones Energy Corp.",
+      "url": "https://www.courtlistener.com/opinion/12345/smith-v-jones-energy-corp/",
+      "snippet": "The court held that ISDS clauses in energy contracts are enforceable under the Energy Charter Treaty.",
+      "court": "Supreme Court of the United States",
+      "date_filed": "2024-03-15",
+      "citations": ["567 U.S. 234"]
+    },
+    {
+      "id": 67890,
+      "case_name": "EnergyState LLC v. Republic of Petrovia",
+      "url": "https://www.courtlistener.com/opinion/67890/energystate-v-petrovia/",
+      "snippet": "An arbitral award under the ICSID Convention requires confirmation before enforcement in US courts.",
+      "court": "United States Court of Appeals, D.C. Circuit",
+      "date_filed": "2023-11-20",
+      "citations": ["78 F.4th 102"]
+    },
+    {
+      "id": 11111,
+      "case_name": "Petroleum Investors Fund v. Novaland",
+      "url": "https://www.courtlistener.com/opinion/11111/petroleum-investors-fund-v-novaland/",
+      "snippet": "Investment treaty arbitration provides an alternative to domestic courts for energy sector disputes.",
+      "court": "United States District Court, S.D.N.Y.",
+      "date_filed": "2023-07-08",
+      "citations": []
+    }
+  ],
+  "count": 3,
+  "next": null,
+  "previous": null
+}
