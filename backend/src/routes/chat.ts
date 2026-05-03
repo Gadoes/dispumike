@@ -13,6 +13,7 @@ import {
 import { completeText } from "../lib/llm";
 import { getUserApiKeys, getUserModelSettings } from "../lib/userSettings";
 import { checkProjectAccess } from "../lib/access";
+import { getEnabledPortableTools } from "../lib/mcp/portable/portableToolProvider";
 
 export const chatRouter = Router();
 
@@ -446,6 +447,8 @@ chatRouter.post("/", requireAuth, async (req, res) => {
     try {
         write(`data: ${JSON.stringify({ type: "chat_id", chatId })}\n\n`);
 
+        const portableTools = await getEnabledPortableTools(userId);
+
         const { fullText, events } = await runLLMStream({
             apiMessages,
             docStore,
@@ -457,6 +460,7 @@ chatRouter.post("/", requireAuth, async (req, res) => {
             model,
             apiKeys,
             projectId: project_id ?? null,
+            mcpServerTools: portableTools.length > 0 ? portableTools : undefined,
             mcpScope: mcpScope ?? null,
         });
 

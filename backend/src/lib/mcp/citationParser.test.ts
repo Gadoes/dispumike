@@ -242,4 +242,90 @@ describe("parseMcpResultToCitations", () => {
         const citations = parseMcpResultToCitations("courtlistener", blob, USER_ID);
         expect(citations[0].excerpt?.length).toBeLessThanOrEqual(500);
     });
+
+    it("unwraps MCP content envelope for EUR-Lex results", () => {
+        const innerResults = {
+            results: [
+                {
+                    celex: "32016R0679",
+                    title: "General Data Protection Regulation",
+                    date: "2016-04-27",
+                    url: "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32016R0679",
+                    excerpt: "...processing of personal data...",
+                },
+                {
+                    celex: "62024CJ0526",
+                    title: "Brillen Rottler — Article 15(1)",
+                    date: "2025-01-09",
+                    url: "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:62024CJ0526",
+                    excerpt: "Data subject right of access",
+                },
+            ],
+        };
+        const wrapped = JSON.stringify({
+            content: [{ type: "text", text: JSON.stringify(innerResults, null, 2) }],
+        });
+
+        const citations = parseMcpResultToCitations("eurlex", wrapped, USER_ID);
+
+        expect(citations).toHaveLength(2);
+        expect(citations[0].source_type).toBe("eurlex");
+        expect(citations[0].source_id).toBe("32016R0679");
+        expect(citations[0].title).toBe("General Data Protection Regulation");
+        expect(citations[0].url).toContain("CELEX:32016R0679");
+        expect(citations[0].excerpt).toBe("...processing of personal data...");
+        expect(citations[1].source_id).toBe("62024CJ0526");
+    });
+
+    it("still parses direct {results: [...]} without MCP envelope", () => {
+        const blob = JSON.stringify({
+            results: [
+                {
+                    celex: "32016R0679",
+                    title: "GDPR",
+                    url: "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32016R0679",
+                    excerpt: "personal data processing",
+                },
+            ],
+        });
+
+        const citations = parseMcpResultToCitations("eurlex", blob, USER_ID);
+
+        expect(citations).toHaveLength(1);
+        expect(citations[0].source_id).toBe("32016R0679");
+    });
+
+    it("returns empty array for malformed MCP content envelope", () => {
+        const blob = JSON.stringify({
+            content: [{ type: "text", text: "not valid json {{{" }],
+        });
+
+        const citations = parseMcpResultToCitations("eurlex", blob, USER_ID);
+        expect(citations).toEqual([]);
+    });
+
+    it("unwraps MCP content envelope for non-portable sources (CourtListener)", () => {
+        const innerResults = {
+            results: [
+                {
+                    id: "99999",
+                    case_name: "Doe v. Smith",
+                    url: "https://www.courtlistener.com/opinion/99999/",
+                    snippet: "The court held that the defendant...",
+                },
+            ],
+        };
+        const wrapped = JSON.stringify({
+            content: [{ type: "text", text: JSON.stringify(innerResults, null, 2) }],
+        });
+
+        const citations = parseMcpResultToCitations("courtlistener", wrapped, USER_ID);
+
+        expect(citations).toHaveLength(1);
+        expect(citations[0].source_type).toBe("courtlistener");
+        expect(citations[0].source_id).toBe("99999");
+        expect(citations[0].title).toBe("Doe v. Smith");
+        expect(citations[0].url).toBe("https://www.courtlistener.com/opinion/99999/");
+        expect(citations[0].excerpt).toBe("The court held that the defendant...");
+    });
 });

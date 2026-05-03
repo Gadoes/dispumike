@@ -1,15 +1,10 @@
 /**
- * EUR-Lex MCP server configuration.
- * Spec: Section 4.4, Chunk 13.
+ * EUR-Lex MCP server configuration (legacy).
  *
- * Package: eur-lex-mcp (scimorph)
- *
- * No API key required — EUR-Lex is publicly accessible.
- * Region glyph: EU·27
- *
- * TODO: replace mock with real package once confirmed available on npm.
- * When the package is not installed, McpClientManager will catch the spawn
- * error and emit source_unavailable instead of crashing.
+ * @deprecated EUR-Lex is now handled in-process via portableToolProvider
+ * using direct SPARQL queries to publications.europa.eu. The buildEurLexConfig
+ * function below is kept for backward compatibility with existing tests.
+ * See: src/lib/mcp/portable/eurlex/client.ts for the live implementation.
  */
 
 import type { McpServerConfig } from "../types.js";

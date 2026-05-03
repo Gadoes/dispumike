@@ -13,6 +13,7 @@ import {
 } from "../lib/chatTools";
 import { getUserApiKeys } from "../lib/userSettings";
 import { checkProjectAccess } from "../lib/access";
+import { getEnabledPortableTools } from "../lib/mcp/portable/portableToolProvider";
 
 const PROJECT_SYSTEM_PROMPT_EXTRA = `PROJECT CONTEXT:
 You are operating within a project folder that contains a collection of legal documents the user has organised for a single matter. The user's questions will usually refer to one or more documents in this project — your job is to find the relevant files to work on. Use list_documents to see what is available and fetch_documents / read_document to pull in any documents you need before answering.
@@ -158,6 +159,8 @@ projectChatRouter.post("/", requireAuth, async (req, res) => {
     try {
         write(`data: ${JSON.stringify({ type: "chat_id", chatId })}\n\n`);
 
+        const portableTools = await getEnabledPortableTools(userId);
+
         const { fullText, events } = await runLLMStream({
             apiMessages,
             docStore,
@@ -170,6 +173,7 @@ projectChatRouter.post("/", requireAuth, async (req, res) => {
             model,
             apiKeys,
             projectId,
+            mcpServerTools: portableTools.length > 0 ? portableTools : undefined,
             mcpScope: mcpScope ?? null,
         });
 

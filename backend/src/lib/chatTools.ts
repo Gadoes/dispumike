@@ -445,6 +445,31 @@ function normalizeCitation(raw: unknown): ParsedCitation | null {
 // Helpers
 // ---------------------------------------------------------------------------
 
+export function buildMcpPromptSection(
+    activeMcpToolDefs: Array<{ function: { name: string } }>,
+    mcpServerTools: Array<{ serverName: string; tools: { name: string }[]; displayName?: string }>,
+): string {
+    if (activeMcpToolDefs.length === 0 || mcpServerTools.length === 0) return "";
+
+    const activeServerNames = new Set(
+        activeMcpToolDefs.map((t) => {
+            const parsed = parseMcpToolName(t.function.name);
+            return parsed?.serverName;
+        }).filter(Boolean),
+    );
+    const serverDescriptions = mcpServerTools
+        .filter(({ serverName }) => activeServerNames.has(serverName))
+        .map(({ serverName, displayName, tools }) =>
+            `- ${displayName ?? serverName}: ${tools.map((t) => `mcp__${serverName}__${t.name}`).join(", ")}`,
+        )
+        .join("\n");
+    if (!serverDescriptions) return "";
+
+    let section = `\n\nACTIVE LEGAL DATABASE SOURCES:\nThe following MCP sources are available for this query. Use their tools to retrieve legal citations when relevant:\n${serverDescriptions}`;
+    section += `\n\nIMPORTANT — MCP source citation format:\nMCP-sourced claims (from the legal databases listed above) MUST NOT appear in your <CITATIONS> block. The <CITATIONS> block is reserved exclusively for claims derived from the user's project documents (referenced by chat-local doc-N labels).\n\nFor MCP sources, cite inline using markdown links:\n[Case name or document title](https://full.url.here)\n\nExample: According to [Case C-97/23 P, WhatsApp Ireland v EDPB](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:62023CJ0097), the Court held that...`;
+    return section;
+}
+
 export function resolveDoc(rawId: string, docIndex: DocIndex) {
     return docIndex[rawId];
 }
@@ -1560,6 +1585,8 @@ export async function runToolCalls(
     const docsEdited: DocEditedResult[] = [];
     /** Accumulated MCP citations for Chunk 4 */
     const mcpCitations: import("./mcp/types.js").Citation[] = [];
+    /** Sources that failed in this stream — skip subsequent calls (keyed by source name, not tool) */
+    const failedPortableSources = new Set<string>();
 
     for (const tc of toolCalls) {
         let args: Record<string, unknown> = {};
@@ -2266,6 +2293,58 @@ export async function runToolCalls(
                 );
 
                 try {
+                    const { isPortableSource, handlePortableToolCall, isSourceCircuitOpen } = await import("./mcp/portable/portableToolProvider.js");
+                    if (isPortableSource(serverName)) {
+                        // Per-stream skip: if this source already failed in this response, don't retry
+                        if (failedPortableSources.has(serverName) || isSourceCircuitOpen(serverName)) {
+                            const displayName = serverName.charAt(0).toUpperCase() + serverName.slice(1);
+                            const skipEnvelope = JSON.stringify({
+                                content: [{ type: "text", text: `${displayName} is temporarily unreachable. Do not retry this source — inform the user that ${displayName} is currently unavailable.` }],
+                            });
+                            toolResults.push({ role: "tool", tool_call_id: tc.id, content: skipEnvelope });
+                            write(
+                                `data: ${JSON.stringify({
+                                    type: "source_unavailable",
+                                    source: serverName,
+                                    message: `${serverName} is temporarily unavailable`,
+                                })}\n\n`,
+                            );
+                            continue;
+                        }
+
+                        const mcpResultStr = await handlePortableToolCall(serverName, mcpTool, args);
+                        toolResults.push({
+                            role: "tool",
+                            tool_call_id: tc.id,
+                            content: mcpResultStr,
+                        });
+
+                        const mcpResult = JSON.parse(mcpResultStr);
+                        if (mcpResult?.content?.[0]?.text?.includes("temporarily unreachable")) {
+                            failedPortableSources.add(serverName);
+                            write(
+                                `data: ${JSON.stringify({
+                                    type: "source_unavailable",
+                                    source: serverName,
+                                    message: `${serverName} is temporarily unavailable`,
+                                })}\n\n`,
+                            );
+                        }
+
+                        if (!failedPortableSources.has(serverName)) {
+                            const { parseMcpResultToCitations } = await import("./mcp/citationParser.js");
+                            const sourceTypeMap: Record<string, import("./mcp/types.js").CitationSourceType> = {
+                                italaw: "italaw",
+                                icsid: "icsid",
+                                eurlex: "eurlex",
+                            };
+                            const sourceType = sourceTypeMap[serverName];
+                            if (sourceType) {
+                                const newCitations = parseMcpResultToCitations(sourceType, mcpResultStr, userId);
+                                mcpCitations.push(...(newCitations as import("./mcp/types.js").Citation[]));
+                            }
+                        }
+                    } else {
                     let resolvedManager = mcpManager ?? null;
                     if (!resolvedManager) {
                         try {
@@ -2315,6 +2394,7 @@ export async function runToolCalls(
                             }
                         }
                     }
+                    } // close portable else
                 } catch (err) {
                     toolResults.push({
                         role: "tool",
@@ -2504,21 +2584,10 @@ export async function runLLMStream(params: {
 
     // Add MCP source descriptions to system prompt (Chunk 3)
     if (activeMcpToolDefs.length > 0 && mcpServerTools) {
-        const activeServerNames = new Set(
-            activeMcpToolDefs.map((t) => {
-                const parsed = parseMcpToolName((t as { function: { name: string } }).function.name);
-                return parsed?.serverName;
-            }).filter(Boolean)
+        systemPrompt += buildMcpPromptSection(
+            activeMcpToolDefs as Array<{ function: { name: string } }>,
+            mcpServerTools,
         );
-        const serverDescriptions = mcpServerTools
-            .filter(({ serverName }) => activeServerNames.has(serverName))
-            .map(({ serverName, displayName, tools }) =>
-                `- ${displayName ?? serverName}: ${tools.map((t) => `mcp__${serverName}__${t.name}`).join(", ")}`
-            )
-            .join("\n");
-        if (serverDescriptions) {
-            systemPrompt += `\n\nACTIVE LEGAL DATABASE SOURCES:\nThe following MCP sources are available for this query. Use their tools to retrieve legal citations when relevant:\n${serverDescriptions}`;
-        }
     }
 
     // Append unavailability notes for open-circuit sources (Chunk 18)

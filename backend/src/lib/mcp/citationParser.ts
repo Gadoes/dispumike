@@ -155,13 +155,30 @@ export function parseMcpResultToCitations(
 
     if (typeof parsed !== "object" || parsed === null) return [];
 
-    const asObj = parsed as Record<string, unknown>;
+    let asObj = parsed as Record<string, unknown>;
+
+    // Unwrap MCP content envelope: {content: [{type: "text", text: "{\"results\":[...]}"}]}
+    if (Array.isArray(asObj.content)) {
+        const textBlock = (asObj.content as Array<Record<string, unknown>>).find(
+            (b) => b.type === "text" && typeof b.text === "string",
+        );
+        if (textBlock) {
+            try {
+                const inner = JSON.parse(textBlock.text as string);
+                if (typeof inner === "object" && inner !== null) {
+                    asObj = inner as Record<string, unknown>;
+                }
+            } catch {
+                // fall through to existing logic
+            }
+        }
+    }
 
     // Results can be in `results` array (live sources) or directly as array
     const resultsArray: unknown[] = Array.isArray(asObj.results)
         ? asObj.results
-        : Array.isArray(parsed)
-        ? parsed
+        : Array.isArray(asObj)
+        ? (asObj as unknown as unknown[])
         : [];
 
     const citations: Omit<Citation, "id" | "chat_message_id">[] = [];

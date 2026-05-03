@@ -16,3 +16,7 @@ next-env.d.ts
 .DS_Store
 .vercel
 coverage
+
+docs/
+supabase/
+backend/data/

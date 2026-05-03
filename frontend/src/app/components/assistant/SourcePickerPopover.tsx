@@ -12,8 +12,8 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Search, Globe, X } from "lucide-react";
-import { listMcpConnections, type McpServerRecord } from "@/app/lib/mikeApi";
+import { Search, Globe, X, Loader2 } from "lucide-react";
+import { listMcpConnections, saveMcpConnection, deleteMcpConnection, type McpServerRecord } from "@/app/lib/mikeApi";
 
 // ---------------------------------------------------------------------------
 // Region ordering
@@ -107,6 +107,7 @@ export function SourcePickerPopover({
     const [servers, setServers] = useState<McpServerRecord[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
     const [isLoading, setIsLoading] = useState(true);
+    const [connectingId, setConnectingId] = useState<string | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const searchRef = useRef<HTMLInputElement>(null);
 
@@ -159,6 +160,45 @@ export function SourcePickerPopover({
         document.addEventListener("keydown", handleKeyDown);
         return () => document.removeEventListener("keydown", handleKeyDown);
     }, [onClose]);
+
+    async function handleConnectToggle(server: McpServerRecord) {
+        if (connectingId) return;
+        const status = getConnectionStatus(server);
+        if (status === "always_on" || status === "permission_required") return;
+
+        setConnectingId(server.id);
+        try {
+            if (status === "connected") {
+                await deleteMcpConnection(server.id);
+                setServers((prev) =>
+                    prev.map((s) =>
+                        s.id === server.id ? { ...s, connection: null } : s,
+                    ),
+                );
+            } else {
+                await saveMcpConnection({ server_id: server.id, enabled: true });
+                setServers((prev) =>
+                    prev.map((s) =>
+                        s.id === server.id
+                            ? {
+                                  ...s,
+                                  connection: {
+                                      id: "",
+                                      enabled: true,
+                                      has_key: false,
+                                      key_version: 1,
+                                      created_at: new Date().toISOString(),
+                                      updated_at: new Date().toISOString(),
+                                  },
+                              }
+                            : s,
+                    ),
+                );
+            }
+        } finally {
+            setConnectingId(null);
+        }
+    }
 
     // Filter servers by search query
     const filteredServers = searchQuery.trim()
@@ -246,10 +286,18 @@ export function SourcePickerPopover({
                                     const isChecked = activeScope
                                         ? activeScope.includes(server.name)
                                         : server.connection?.enabled ?? false;
+                                    const isConnecting = connectingId === server.id;
+                                    const isClickable =
+                                        status === "connect" || status === "connected";
                                     return (
                                         <div
                                             key={server.id}
-                                            className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50"
+                                            onClick={
+                                                isClickable
+                                                    ? () => handleConnectToggle(server)
+                                                    : undefined
+                                            }
+                                            className={`flex items-center gap-2 px-3 py-2 hover:bg-gray-50 ${isClickable ? "cursor-pointer" : ""}`}
                                         >
                                             {/* Checkbox (Chunk 8) */}
                                             {onToggleSource && (
@@ -285,7 +333,11 @@ export function SourcePickerPopover({
                                             </span>
 
                                             {/* State badge */}
-                                            <StateBadge status={status} />
+                                            {isConnecting ? (
+                                                <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400 flex-shrink-0" />
+                                            ) : (
+                                                <StateBadge status={status} />
+                                            )}
                                         </div>
                                     );
                                 })}

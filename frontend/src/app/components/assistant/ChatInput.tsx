@@ -3,6 +3,7 @@
 import {
     useState,
     useCallback,
+    useEffect,
     useRef,
     forwardRef,
     useImperativeHandle,
@@ -23,6 +24,7 @@ import { AssistantWorkflowModal } from "./AssistantWorkflowModal";
 import { ApiKeyMissingModal } from "../shared/ApiKeyMissingModal";
 import { ModelToggle } from "./ModelToggle";
 import { SourcesPill, SourcePickerPopover } from "./SourcePickerPopover";
+import { listMcpConnections } from "@/app/lib/mikeApi";
 import { useSelectedModel } from "@/app/hooks/useSelectedModel";
 import { useUserProfile } from "@/contexts/UserProfileContext";
 import {
@@ -78,9 +80,26 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     const [apiKeyModalProvider, setApiKeyModalProvider] =
         useState<ModelProvider | null>(null);
     const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
-    // activeSourceCount is 0 until the user has connected sources; computed on
-    // popover open. Chunk 8 will wire this up to actual active scope.
     const [activeSourceCount, setActiveSourceCount] = useState(0);
+
+    useEffect(() => {
+        if (sourcePickerOpen) return;
+        let cancelled = false;
+        listMcpConnections()
+            .then((servers) => {
+                if (!cancelled) {
+                    setActiveSourceCount(
+                        servers.filter(
+                            (s) =>
+                                s.default_enabled ||
+                                s.connection?.enabled,
+                        ).length,
+                    );
+                }
+            })
+            .catch(() => {});
+        return () => { cancelled = true; };
+    }, [sourcePickerOpen]);
 
     useImperativeHandle(ref, () => ({
         addDoc: (doc: MikeDocument) => {

@@ -132,6 +132,13 @@ export function ChatView({
      */
     const openCitation = useCallback(
         (citation: MikeCitationAnnotation) => {
+            if (!citation.document_id) {
+                console.warn(
+                    "[ChatView] openCitation: no document_id for citation, skipping side panel",
+                    { doc_id: (citation as any).doc_id, filename: citation.filename },
+                );
+                return;
+            }
             upsertTab({
                 kind: "citation",
                 id: citation.document_id,
@@ -543,6 +550,7 @@ export function ChatView({
                                                 resolvedEditStatuses={
                                                     resolvedEditStatuses
                                                 }
+                                                mcpCitations={msg.mcpCitations}
                                             />
                                         )}
                                     </div>
